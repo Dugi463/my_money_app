@@ -53,6 +53,12 @@ def load_data():
     conn = sqlite3.connect('money.db')
     df = pd.read_sql_query("SELECT * FROM expenses", conn)
     conn.close()
+    
+    # --- 추가된 코드: amount 열에 콤마나 문자가 섞여 있어도 무조건 숫자로 강제 변환 ---
+    if not df.empty:
+        df['amount'] = df['amount'].astype(str).str.replace(',', '').str.replace('원', '').astype(int)
+    # ------------------------------------------------------------------
+    
     return df
 
 # 5. 데이터 삭제 함수 (새로 추가)
@@ -67,6 +73,35 @@ def delete_data(ids):
     conn.commit()
     conn.close()
     
+# 6. CSV 내보내기용 변환 함수
+def convert_df_to_csv(df):
+    # 한글 깨짐 방지를 위해 utf-8-sig 사용
+    return df.to_csv(index=False).encode('utf-8-sig')
+
+# 7. CSV 데이터를 DB에 업로드하는 함수
+def import_csv_to_db(uploaded_file):
+    try:
+        import_df = pd.read_csv(uploaded_file)
+        required_columns = ['date', 'type', 'category', 'amount', 'memo']
+        
+        if not all(col in import_df.columns for col in required_columns):
+            st.error("CSV 파일 형식이 잘못되었습니다.")
+            return
+        
+        import_df['date'] = pd.to_datetime(import_df['date'], format='mixed').dt.strftime('%Y-%m-%d')
+        
+        # --- 추가된 코드: CSV에서 가져온 금액에서 콤마를 제거하고 숫자로 변환 ---
+        import_df['amount'] = import_df['amount'].astype(str).str.replace(',', '').str.replace('원', '').astype(int)
+        # --------------------------------------------------------
+
+        conn = sqlite3.connect('money.db')
+        import_df[required_columns].to_sql('expenses', conn, if_exists='append', index=False)
+        conn.close()
+        st.success(f"{len(import_df)}개의 내역을 가져왔습니다!")
+        st.rerun()
+    except Exception as e:
+        st.error(f"오류 발생: {e}")
+
 init_db()
 
 # --- 세션 상태 초기화 ---
@@ -74,7 +109,7 @@ if 'current_date' not in st.session_state:
     st.session_state['current_date'] = datetime.date.today()
 
 category_list = ["식비", "교통", "쇼핑", "의료", "주거", "여가", "저축", "기타"]
-
+#df['date'] = pd.to_datetime(df['date']).dt.date
 ### --- 화면 구성 (수정된 부분) ---
 st.title('💰 나의 스마트 가계부')
 
@@ -115,13 +150,40 @@ if submitted:
     st.success(f"{category} 항목으로 저장되었습니다!")
     st.rerun()
 
+# --- 사이드바: 데이터 관리 ---
+with st.sidebar:
+    st.header("📂 데이터 관리")
+    
+    # 1. CSV 내보내기 (Download)
+    st.subheader("데이터 백업")
+    all_data = load_data()
+    if not all_data.empty:
+        csv_data = convert_df_to_csv(all_data)
+        st.download_button(
+            label="📥 전체 내역 CSV로 저장",
+            data=csv_data,
+            file_name=f"my_money_history_{datetime.date.today()}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    
+    st.divider()
+    
+    # 2. CSV 가져오기 (Upload)
+    st.subheader("데이터 복구/추가")
+    uploaded_file = st.file_uploader("CSV 파일을 선택하세요", type=["csv"])
+    if uploaded_file is not None:
+        if st.button("🚀 DB에 데이터 추가하기", use_container_width=True):
+            import_csv_to_db(uploaded_file)
+
 st.divider()
 
 # --- 통계 및 내역 조회 ---
 df = load_data()
 
 if not df.empty:
-    df['date'] = pd.to_datetime(df['date']).dt.date
+    # format='mixed'를 추가하여 . 이나 - 모두 인식하게 합니다.
+    df['date'] = pd.to_datetime(df['date'], format='mixed').dt.date
     df['year_month'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m')
     
     month_options = sorted(df['year_month'].unique(), reverse=True)
@@ -185,7 +247,8 @@ if not df.empty:
     ).properties(height=300)
 
     st.altair_chart(pie_chart, use_container_width=True)
-    ####
+
+#### (위쪽 파이 차트 코드는 그대로 유지) ####
 
     st.write("**상세 지출 내역**")
     cols = st.columns(4)
@@ -194,42 +257,47 @@ if not df.empty:
 
     st.divider()
     st.subheader("📋 전체 내역 수정")
-    st.info("💡 표의 칸을 더블 클릭해서 내용을 수정한 후, 아래 [✅ 수정사항 저장] 버튼을 눌러야 반영됩니다.")
+    st.info("💡 표의 칸을 더블 클릭해서 내용을 수정한 후, 아래 [✅ 변경사항 저장] 버튼을 눌러야 반영됩니다.")
     
-
+    # ---------------------------------------------------------
+    # 여기서부터 오류가 났던 부분입니다. 
+    # if not df.empty: 안쪽에 속하도록 들여쓰기(띄어쓰기 4칸)를 맞췄습니다.
+    # ---------------------------------------------------------
     display_df = filtered_df.copy()
-# 숫자로 변환하여 편집 가능하게 함
-display_df['amount'] = pd.to_numeric(display_df['amount'].astype(str).str.replace(',', ''), errors='coerce')
-
-edited_df = st.data_editor(
-    display_df,
-    column_order=["date", "type", "amount", "category", "memo"],
-    column_config={
-        "id": None, "year_month": None,
-        "type": st.column_config.SelectboxColumn("구분", options=["지출", "수입"]),
-        "category": st.column_config.SelectboxColumn("카테고리", options=category_list),
-        "amount": st.column_config.NumberColumn("금액 (원)", format="%d"),
-        "date": st.column_config.DateColumn("날짜"),
-        "memo": st.column_config.TextColumn("메모")
-    },
-    hide_index=True,
-    use_container_width=True,
-    num_rows="dynamic",  # 행 삭제/추가 활성화
-    key="expense_editor" # 상태 추적용 키
-)
-
-
-if st.button("✅ 변경사항(수정/삭제) 저장", use_container_width=True):
-    # 1. 삭제된 행 처리
-    deleted_indices = st.session_state["expense_editor"].get("deleted_rows", [])
-    if deleted_indices:
-        ids_to_delete = display_df.iloc[deleted_indices]['id'].tolist()
-        delete_data(ids_to_delete)
-
-    # 2. 수정된 행 처리 (기존 함수 활용)
-    update_db(edited_df)
-
-    st.success("성공적으로 반영되었습니다!")
-    st.rerun()
-
     
+    # 숫자로 변환하여 편집 가능하게 함
+    display_df['amount'] = pd.to_numeric(display_df['amount'].astype(str).str.replace(',', ''), errors='coerce')
+
+    edited_df = st.data_editor(
+        display_df,
+        column_order=["date", "type", "amount", "category", "memo"],
+        column_config={
+            "id": None, "year_month": None,
+            "type": st.column_config.SelectboxColumn("구분", options=["지출", "수입"]),
+            "category": st.column_config.SelectboxColumn("카테고리", options=category_list),
+            "amount": st.column_config.NumberColumn("금액 (원)", format="%d"),
+            "date": st.column_config.DateColumn("날짜"),
+            "memo": st.column_config.TextColumn("메모")
+        },
+        hide_index=True,
+        use_container_width=True,
+        num_rows="dynamic",  # 행 삭제/추가 활성화
+        key="expense_editor" # 상태 추적용 키
+    )
+
+    if st.button("✅ 변경사항(수정/삭제) 저장", use_container_width=True):
+        # 1. 삭제된 행 처리
+        deleted_indices = st.session_state["expense_editor"].get("deleted_rows", [])
+        if deleted_indices:
+            ids_to_delete = display_df.iloc[deleted_indices]['id'].tolist()
+            delete_data(ids_to_delete)
+
+        # 2. 수정된 행 처리 (기존 함수 활용)
+        update_db(edited_df)
+
+        st.success("성공적으로 반영되었습니다!")
+        st.rerun()
+
+# if not df.empty: 조건문의 짝꿍인 else 문입니다.
+else:
+    st.info("저장된 내역이 없습니다.")
