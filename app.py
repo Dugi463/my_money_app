@@ -108,7 +108,7 @@ init_db()
 if 'current_date' not in st.session_state:
     st.session_state['current_date'] = datetime.date.today()
 
-category_list = ["식비", "교통", "쇼핑", "의료", "주거", "여가", "저축", "기타"]
+category_list = ["식비", "교통", "쇼핑", "고정", "주거", "여가", "저축", "기타"]
 #df['date'] = pd.to_datetime(df['date']).dt.date
 ### --- 화면 구성 (수정된 부분) ---
 st.title('💰 나의 스마트 가계부')
@@ -212,10 +212,17 @@ if not df.empty:
         
     merged_df = pd.merge(base_categories, category_sum, on='category', how='left').fillna(0)
     
+    # 🌟 핵심 수정 포인트: 차트용 데이터에서 '저축'을 제외합니다.
+    merged_df = merged_df[merged_df['category'] != '저축']
+    
+    # x축 정렬을 위해 '저축'이 빠진 새로운 리스트를 만듭니다.
+    chart_categories = [c for c in category_list if c != '저축']
+
     color_scale = alt.Scale(scheme='set2')
 
+    # sort=chart_categories 로 수정되어 저축이 빈칸으로 남지 않게 합니다.
     base_chart = alt.Chart(merged_df).encode(
-        x=alt.X('category:N', sort=category_list, axis=alt.Axis(labelAngle=0, title='카테고리'))
+        x=alt.X('category:N', sort=chart_categories, axis=alt.Axis(labelAngle=0, title='카테고리'))
     )
 
     bars = base_chart.mark_bar().encode(
@@ -238,7 +245,7 @@ if not df.empty:
 
     st.altair_chart(chart, use_container_width=True)
 
-    #### 파이 차트 추가 예시
+    #### 파이 차트 ####
     st.subheader("🍕 지출 비중")
     pie_chart = alt.Chart(merged_df).mark_arc(innerRadius=50).encode(
         theta=alt.Theta(field="amount", type="quantitative"),
@@ -247,15 +254,18 @@ if not df.empty:
     ).properties(height=300)
 
     st.altair_chart(pie_chart, use_container_width=True)
-
-#### (위쪽 파이 차트 코드는 그대로 유지) ####
+    ####
 
     st.write("**상세 지출 내역**")
     cols = st.columns(4)
+    # merged_df에서 이미 저축이 빠졌기 때문에 글자 내역에서도 자동으로 저축이 안 나옵니다.
     for i, row in merged_df.iterrows():
         cols[i % 4].write(f"{row['category']}: {int(row['amount']):,}원")
 
     st.divider()
+
+#### (위쪽 파이 차트 코드는 그대로 유지) ####
+
     st.subheader("📋 전체 내역 수정")
     st.info("💡 표의 칸을 더블 클릭해서 내용을 수정한 후, 아래 [✅ 변경사항 저장] 버튼을 눌러야 반영됩니다.")
     
