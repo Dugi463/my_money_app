@@ -55,6 +55,18 @@ def load_data():
     conn.close()
     return df
 
+# 5. 데이터 삭제 함수 (새로 추가)
+def delete_data(ids):
+    if not ids:
+        return
+    conn = sqlite3.connect('money.db')
+    c = conn.cursor()
+    # 선택된 ID들을 한꺼번에 삭제합니다.
+    query = f"DELETE FROM expenses WHERE id IN ({','.join(map(str, ids))})"
+    c.execute(query)
+    conn.commit()
+    conn.close()
+    
 init_db()
 
 # --- 세션 상태 초기화 ---
@@ -165,30 +177,38 @@ if not df.empty:
     st.subheader("📋 전체 내역 수정")
     st.info("💡 표의 칸을 더블 클릭해서 내용을 수정한 후, 아래 [✅ 수정사항 저장] 버튼을 눌러야 반영됩니다.")
     
-    display_df = filtered_df.copy()
-    display_df['amount'] = display_df['amount'].apply(lambda x: f"{x:,}")
-    
-    edited_df = st.data_editor(
-        display_df,
-        column_order=["date", "type", "amount", "category", "memo"],
-        column_config={
-            "id": None, "year_month": None,
-            "type": st.column_config.SelectboxColumn("구분", options=["지출", "수입"]),
-            "category": st.column_config.SelectboxColumn("카테고리", options=category_list),
-            "amount": st.column_config.TextColumn("금액 (원)"),
-            "date": st.column_config.DateColumn("날짜"),
-            "memo": st.column_config.TextColumn("메모")
-        },
-        hide_index=True,
-        use_container_width=True
-        # 실시간 추적용이었던 key="expense_editor" 삭제
-    )
 
-    # 듬직한 수동 저장 버튼 부활!
-    if st.button("✅ 수정사항 저장", use_container_width=True):
-        update_db(edited_df)
-        st.success("수정사항이 안전하게 저장되었습니다!")
-        st.rerun()
-            
-else:
-    st.info("저장된 내역이 없습니다.")
+    display_df = filtered_df.copy()
+# 숫자로 변환하여 편집 가능하게 함
+display_df['amount'] = pd.to_numeric(display_df['amount'].astype(str).str.replace(',', ''), errors='coerce')
+
+edited_df = st.data_editor(
+    display_df,
+    column_order=["date", "type", "amount", "category", "memo"],
+    column_config={
+        "id": None, "year_month": None,
+        "type": st.column_config.SelectboxColumn("구분", options=["지출", "수입"]),
+        "category": st.column_config.SelectboxColumn("카테고리", options=category_list),
+        "amount": st.column_config.NumberColumn("금액 (원)", format="%d"),
+        "date": st.column_config.DateColumn("날짜"),
+        "memo": st.column_config.TextColumn("메모")
+    },
+    hide_index=True,
+    use_container_width=True,
+    num_rows="dynamic",  # 행 삭제/추가 활성화
+    key="expense_editor" # 상태 추적용 키
+)
+
+
+if st.button("✅ 변경사항(수정/삭제) 저장", use_container_width=True):
+    # 1. 삭제된 행 처리
+    deleted_indices = st.session_state["expense_editor"].get("deleted_rows", [])
+    if deleted_indices:
+        ids_to_delete = display_df.iloc[deleted_indices]['id'].tolist()
+        delete_data(ids_to_delete)
+
+    # 2. 수정된 행 처리 (기존 함수 활용)
+    update_db(edited_df)
+
+    st.success("성공적으로 반영되었습니다!")
+    st.rerun()
