@@ -42,9 +42,9 @@ def update_db(edited_df):
         clean_amount = int(str(row['amount']).replace(',', '').replace('원', '').strip())
         c.execute("""
             UPDATE expenses 
-            SET date = ?, type = ?, amount = ?, memo = ? 
+            SET date = ?, type = ?, category = ?, amount = ?, memo = ? 
             WHERE id = ?
-        """, (str(row['date']), row['type'], clean_amount, row['memo'], row['id']))
+        """, (str(row['date']), row['type'], row['category'], clean_amount, row['memo'], row['id']))
     conn.commit()
     conn.close()
 
@@ -117,7 +117,7 @@ if not df.empty:
     c2.metric("이번 달 지출", f"{total_expense:,}원")
     c3.metric("남은 잔액", f"{total_income - total_expense:,}원")
 
-    # --- 카테고리별 통계 차트 (시각적 개선) ---
+    # --- 카테고리별 통계 차트 ---
     st.subheader("📊 카테고리별 지출 분석")
 
     base_categories = pd.DataFrame({'category': category_list})
@@ -130,35 +130,28 @@ if not df.empty:
         
     merged_df = pd.merge(base_categories, category_sum, on='category', how='left').fillna(0)
     
-    # 채도를 약간 올린 파스텔 색상 팔레트(set2)를 사용합니다.
     color_scale = alt.Scale(scheme='set2')
 
-    # 기본 막대 차트 정의
     base_chart = alt.Chart(merged_df).encode(
         x=alt.X('category:N', sort=category_list, axis=alt.Axis(labelAngle=0, title='카테고리'))
     )
 
-    # 막대 그래프 레이어
     bars = base_chart.mark_bar().encode(
         y=alt.Y('amount:Q', axis=alt.Axis(title='금액 (원)')),
-        # 개선된 색상 스케일을 적용합니다.
         color=alt.Color('category:N', scale=color_scale, legend=None),
         tooltip=[alt.Tooltip('category', title='카테고리'), alt.Tooltip('amount', title='금액', format=',d')]
     )
 
-    # 금액 텍스트 레이어 (막대 위에 표시)
     text = base_chart.mark_text(
         align='center',
         baseline='bottom',
-        dy=-5, # 텍스트 위치를 막대 위로 약간 올립니다.
-        fontSize=12, # 글자 크기 조정
+        dy=-5, 
+        fontSize=12, 
     ).encode(
         y=alt.Y('amount:Q'),
-        # 금액 데이터에 천 단위 콤마 서식을 적용하여 표시합니다.
         text=alt.Text('amount:Q', format=',.0f')
     )
 
-    # 막대 그래프와 텍스트 레이어를 겹쳐서 하나의 차트로 만듭니다.
     chart = alt.layer(bars, text).properties(height=380)
 
     st.altair_chart(chart, use_container_width=True)
@@ -177,12 +170,15 @@ if not df.empty:
     
     edited_df = st.data_editor(
         display_df,
+        # 🌟 여기에 column_order를 추가하여 원하는 순서대로 열을 배치했습니다. (메모와 카테고리 위치 변경)
+        column_order=["date", "type", "memo", "amount", "category"],
         column_config={
             "id": None, "year_month": None,
             "type": st.column_config.SelectboxColumn("구분", options=["지출", "수입"]),
             "category": st.column_config.SelectboxColumn("카테고리", options=category_list),
             "amount": st.column_config.TextColumn("금액 (원)"),
-            "date": st.column_config.DateColumn("날짜")
+            "date": st.column_config.DateColumn("날짜"),
+            "memo": st.column_config.TextColumn("메모") # 영어 memo를 한글 '메모'로 출력되게 수정
         },
         hide_index=True,
         use_container_width=True,
