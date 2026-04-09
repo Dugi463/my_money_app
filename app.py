@@ -75,20 +75,28 @@ if 'current_date' not in st.session_state:
 
 category_list = ["식비", "교통", "쇼핑", "의료", "주거", "여가", "저축", "기타"]
 
-# --- 화면 구성 ---
+### --- 화면 구성 (수정된 부분) ---
 st.title('💰 나의 스마트 가계부')
 
 st.write("날짜 선택")
 col_prev, col_date, col_next = st.columns([1, 4, 1])
+
 with col_prev:
     if st.button("◀ 이전", use_container_width=True):
         st.session_state['current_date'] -= datetime.timedelta(days=1)
+        st.rerun()  # 즉시 화면을 새로고침하여 바뀐 날짜를 반영
+
 with col_date:
+    # date_input의 value는 session_state를 바라보게 합니다.
     selected_date = st.date_input("날짜 입력", value=st.session_state['current_date'], label_visibility="collapsed")
+    # 사용자가 달력에서 직접 날짜를 선택했을 때를 위해 state를 동기화합니다.
     st.session_state['current_date'] = selected_date
+
 with col_next:
     if st.button("다음 ▶", use_container_width=True):
         st.session_state['current_date'] += datetime.timedelta(days=1)
+        st.rerun()  # 즉시 화면을 새로고침하여 바뀐 날짜를 반영
+###
 
 with st.form("입력폼", clear_on_submit=True):
     col_t, col_c = st.columns(2)
@@ -167,7 +175,18 @@ if not df.empty:
     chart = alt.layer(bars, text).properties(height=380)
 
     st.altair_chart(chart, use_container_width=True)
-    
+
+    #### 파이 차트 추가 예시
+    st.subheader("🍕 지출 비중")
+    pie_chart = alt.Chart(merged_df).mark_arc(innerRadius=50).encode(
+        theta=alt.Theta(field="amount", type="quantitative"),
+        color=alt.Color(field="category", type="nominal", scale=color_scale),
+        tooltip=['category', 'amount']
+    ).properties(height=300)
+
+    st.altair_chart(pie_chart, use_container_width=True)
+    ####
+
     st.write("**상세 지출 내역**")
     cols = st.columns(4)
     for i, row in merged_df.iterrows():
@@ -212,3 +231,5 @@ if st.button("✅ 변경사항(수정/삭제) 저장", use_container_width=True)
 
     st.success("성공적으로 반영되었습니다!")
     st.rerun()
+
+    
