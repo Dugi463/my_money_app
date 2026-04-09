@@ -48,26 +48,21 @@ def update_db(edited_df):
     conn.commit()
     conn.close()
 
-# 4. 데이터 불러오기 함수
+# 4. 데이터 불러오기 함수 (문자를 숫자로 강제 변환)
 def load_data():
     conn = sqlite3.connect('money.db')
     df = pd.read_sql_query("SELECT * FROM expenses", conn)
     conn.close()
-    
-    # --- 추가된 코드: amount 열에 콤마나 문자가 섞여 있어도 무조건 숫자로 강제 변환 ---
     if not df.empty:
         df['amount'] = df['amount'].astype(str).str.replace(',', '').str.replace('원', '').astype(int)
-    # ------------------------------------------------------------------
-    
     return df
 
-# 5. 데이터 삭제 함수 (새로 추가)
+# 5. 데이터 삭제 함수
 def delete_data(ids):
     if not ids:
         return
     conn = sqlite3.connect('money.db')
     c = conn.cursor()
-    # 선택된 ID들을 한꺼번에 삭제합니다.
     query = f"DELETE FROM expenses WHERE id IN ({','.join(map(str, ids))})"
     c.execute(query)
     conn.commit()
@@ -75,7 +70,6 @@ def delete_data(ids):
     
 # 6. CSV 내보내기용 변환 함수
 def convert_df_to_csv(df):
-    # 한글 깨짐 방지를 위해 utf-8-sig 사용
     return df.to_csv(index=False).encode('utf-8-sig')
 
 # 7. CSV 데이터를 DB에 업로드하는 함수
@@ -89,10 +83,7 @@ def import_csv_to_db(uploaded_file):
             return
         
         import_df['date'] = pd.to_datetime(import_df['date'], format='mixed').dt.strftime('%Y-%m-%d')
-        
-        # --- 추가된 코드: CSV에서 가져온 금액에서 콤마를 제거하고 숫자로 변환 ---
         import_df['amount'] = import_df['amount'].astype(str).str.replace(',', '').str.replace('원', '').astype(int)
-        # --------------------------------------------------------
 
         conn = sqlite3.connect('money.db')
         import_df[required_columns].to_sql('expenses', conn, if_exists='append', index=False)
@@ -108,9 +99,10 @@ init_db()
 if 'current_date' not in st.session_state:
     st.session_state['current_date'] = datetime.date.today()
 
+# 카테고리 (교육->여가, 의료->고정 반영)
 category_list = ["식비", "교통", "쇼핑", "고정", "주거", "여가", "저축", "기타"]
-#df['date'] = pd.to_datetime(df['date']).dt.date
-### --- 화면 구성 (수정된 부분) ---
+
+# --- 화면 구성 ---
 st.title('💰 나의 스마트 가계부')
 
 st.write("날짜 선택")
@@ -119,19 +111,16 @@ col_prev, col_date, col_next = st.columns([1, 4, 1])
 with col_prev:
     if st.button("◀ 이전", use_container_width=True):
         st.session_state['current_date'] -= datetime.timedelta(days=1)
-        st.rerun()  # 즉시 화면을 새로고침하여 바뀐 날짜를 반영
+        st.rerun() 
 
 with col_date:
-    # date_input의 value는 session_state를 바라보게 합니다.
     selected_date = st.date_input("날짜 입력", value=st.session_state['current_date'], label_visibility="collapsed")
-    # 사용자가 달력에서 직접 날짜를 선택했을 때를 위해 state를 동기화합니다.
     st.session_state['current_date'] = selected_date
 
 with col_next:
     if st.button("다음 ▶", use_container_width=True):
         st.session_state['current_date'] += datetime.timedelta(days=1)
-        st.rerun()  # 즉시 화면을 새로고침하여 바뀐 날짜를 반영
-###
+        st.rerun() 
 
 with st.form("입력폼", clear_on_submit=True):
     col_t, col_c = st.columns(2)
@@ -150,46 +139,43 @@ if submitted:
     st.success(f"{category} 항목으로 저장되었습니다!")
     st.rerun()
 
-# --- 사이드바: 데이터 관리 ---
-with st.sidebar:
-    st.header("📂 데이터 관리")
-    
-    # 1. CSV 내보내기 (Download)
-    st.subheader("데이터 백업")
-    all_data = load_data()
-    if not all_data.empty:
-        csv_data = convert_df_to_csv(all_data)
-        st.download_button(
-            label="📥 전체 내역 CSV로 저장",
-            data=csv_data,
-            file_name=f"my_money_history_{datetime.date.today()}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-    
-    st.divider()
-    
-    # 2. CSV 가져오기 (Upload)
-    st.subheader("데이터 복구/추가")
-    uploaded_file = st.file_uploader("CSV 파일을 선택하세요", type=["csv"])
-    if uploaded_file is not None:
-        if st.button("🚀 DB에 데이터 추가하기", use_container_width=True):
-            import_csv_to_db(uploaded_file)
-
 st.divider()
 
 # --- 통계 및 내역 조회 ---
 df = load_data()
 
 if not df.empty:
-    # format='mixed'를 추가하여 . 이나 - 모두 인식하게 합니다.
     df['date'] = pd.to_datetime(df['date'], format='mixed').dt.date
     df['year_month'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m')
     
     month_options = sorted(df['year_month'].unique(), reverse=True)
     selected_month = st.selectbox("조회할 월을 선택하세요", month_options)
     
+    # 선택된 달의 데이터만 남깁니다.
     filtered_df = df[df['year_month'] == selected_month].copy()
+    
+    # 🌟 사이드바: 위치를 이곳으로 이동하여 '선택된 달'의 데이터만 백업되도록 합니다.
+    with st.sidebar:
+        st.header("📂 데이터 관리")
+        
+        st.subheader(f"데이터 백업 ({selected_month})")
+        # 전체 데이터(all_data)가 아닌 선택된 달의 데이터(filtered_df)를 CSV로 변환
+        csv_data = convert_df_to_csv(filtered_df)
+        st.download_button(
+            label=f"📥 {selected_month} 내역 CSV로 저장",
+            data=csv_data,
+            file_name=f"my_money_history_{selected_month}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+        
+        st.divider()
+        
+        st.subheader("데이터 복구/추가")
+        uploaded_file = st.file_uploader("CSV 파일을 선택하세요", type=["csv"])
+        if uploaded_file is not None:
+            if st.button("🚀 DB에 데이터 추가하기", use_container_width=True):
+                import_csv_to_db(uploaded_file)
     
     total_income = filtered_df[filtered_df['type'] == '수입']['amount'].sum()
     total_expense = filtered_df[filtered_df['type'] == '지출']['amount'].sum()
@@ -212,15 +198,12 @@ if not df.empty:
         
     merged_df = pd.merge(base_categories, category_sum, on='category', how='left').fillna(0)
     
-    # 🌟 핵심 수정 포인트: 차트용 데이터에서 '저축'을 제외합니다.
+    # 🌟 차트 데이터에서 '저축' 제외
     merged_df = merged_df[merged_df['category'] != '저축']
-    
-    # x축 정렬을 위해 '저축'이 빠진 새로운 리스트를 만듭니다.
     chart_categories = [c for c in category_list if c != '저축']
-
+    
     color_scale = alt.Scale(scheme='set2')
 
-    # sort=chart_categories 로 수정되어 저축이 빈칸으로 남지 않게 합니다.
     base_chart = alt.Chart(merged_df).encode(
         x=alt.X('category:N', sort=chart_categories, axis=alt.Axis(labelAngle=0, title='카테고리'))
     )
@@ -254,28 +237,17 @@ if not df.empty:
     ).properties(height=300)
 
     st.altair_chart(pie_chart, use_container_width=True)
-    ####
 
     st.write("**상세 지출 내역**")
     cols = st.columns(4)
-    # merged_df에서 이미 저축이 빠졌기 때문에 글자 내역에서도 자동으로 저축이 안 나옵니다.
     for i, row in merged_df.iterrows():
         cols[i % 4].write(f"{row['category']}: {int(row['amount']):,}원")
 
     st.divider()
-
-#### (위쪽 파이 차트 코드는 그대로 유지) ####
-
     st.subheader("📋 전체 내역 수정")
     st.info("💡 표의 칸을 더블 클릭해서 내용을 수정한 후, 아래 [✅ 변경사항 저장] 버튼을 눌러야 반영됩니다.")
     
-    # ---------------------------------------------------------
-    # 여기서부터 오류가 났던 부분입니다. 
-    # if not df.empty: 안쪽에 속하도록 들여쓰기(띄어쓰기 4칸)를 맞췄습니다.
-    # ---------------------------------------------------------
     display_df = filtered_df.copy()
-    
-    # 숫자로 변환하여 편집 가능하게 함
     display_df['amount'] = pd.to_numeric(display_df['amount'].astype(str).str.replace(',', ''), errors='coerce')
 
     edited_df = st.data_editor(
@@ -291,23 +263,28 @@ if not df.empty:
         },
         hide_index=True,
         use_container_width=True,
-        num_rows="dynamic",  # 행 삭제/추가 활성화
-        key="expense_editor" # 상태 추적용 키
+        num_rows="dynamic",  
+        key="expense_editor" 
     )
 
     if st.button("✅ 변경사항(수정/삭제) 저장", use_container_width=True):
-        # 1. 삭제된 행 처리
         deleted_indices = st.session_state["expense_editor"].get("deleted_rows", [])
         if deleted_indices:
             ids_to_delete = display_df.iloc[deleted_indices]['id'].tolist()
             delete_data(ids_to_delete)
 
-        # 2. 수정된 행 처리 (기존 함수 활용)
         update_db(edited_df)
-
         st.success("성공적으로 반영되었습니다!")
         st.rerun()
 
-# if not df.empty: 조건문의 짝꿍인 else 문입니다.
 else:
+    # 데이터가 없을 때의 사이드바 (백업 없이 추가 기능만 제공)
+    with st.sidebar:
+        st.header("📂 데이터 관리")
+        st.subheader("데이터 복구/추가")
+        uploaded_file = st.file_uploader("CSV 파일을 선택하세요", type=["csv"])
+        if uploaded_file is not None:
+            if st.button("🚀 DB에 데이터 추가하기", use_container_width=True):
+                import_csv_to_db(uploaded_file)
+                
     st.info("저장된 내역이 없습니다.")
