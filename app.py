@@ -2,8 +2,9 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import datetime
+import altair as alt # 차트 디자인을 위해 추가된 라이브러리
 
-# 1. 데이터베이스 연결 및 테이블 생성 (카테고리 컬럼 추가)
+# 1. 데이터베이스 연결 및 테이블 생성
 def init_db():
     conn = sqlite3.connect('money.db')
     c = conn.cursor()
@@ -17,7 +18,6 @@ def init_db():
             memo TEXT
         )
     ''')
-    # 혹시 기존 테이블에 category 컬럼이 없는 경우를 대비해 추가 시도
     try:
         c.execute("ALTER TABLE expenses ADD COLUMN category TEXT DEFAULT '기타'")
     except:
@@ -39,7 +39,6 @@ def update_db(edited_df):
     conn = sqlite3.connect('money.db')
     c = conn.cursor()
     for index, row in edited_df.iterrows():
-        # 금액에서 콤마 제거
         clean_amount = int(str(row['amount']).replace(',', '').replace('원', '').strip())
         c.execute("""
             UPDATE expenses 
@@ -62,10 +61,12 @@ init_db()
 if 'current_date' not in st.session_state:
     st.session_state['current_date'] = datetime.date.today()
 
+# 카테고리 목록 (전역 변수로 빼두어 여러 곳에서 재사용)
+category_list = ["식비", "교통", "쇼핑", "의료", "주거", "교육", "저축", "기타"]
+
 # --- 화면 구성 ---
 st.title('💰 나의 스마트 가계부')
 
-# 날짜 선택 조작
 st.write("날짜 선택")
 col_prev, col_date, col_next = st.columns([1, 4, 1])
 with col_prev:
@@ -78,14 +79,11 @@ with col_next:
     if st.button("다음 ▶", use_container_width=True):
         st.session_state['current_date'] += datetime.timedelta(days=1)
 
-# 입력 폼
 with st.form("입력폼", clear_on_submit=True):
     col_t, col_c = st.columns(2)
     with col_t:
         type_ = st.radio("구분", ["지출", "수입"], index=0, horizontal=True)
     with col_c:
-        # 카테고리 목록 정의
-        category_list = ["식비", "교통", "쇼핑", "의료", "주거", "교육", "저축", "기타"]
         category = st.selectbox("카테고리", category_list)
         
     amount = st.number_input("금액을 입력하세요 (원)", min_value=0, step=1000)
@@ -112,7 +110,6 @@ if not df.empty:
     
     filtered_df = df[df['year_month'] == selected_month].copy()
     
-    # 상단 요약 지표
     total_income = filtered_df[filtered_df['type'] == '수입']['amount'].sum()
     total_expense = filtered_df[filtered_df['type'] == '지출']['amount'].sum()
     
@@ -121,29 +118,44 @@ if not df.empty:
     c2.metric("이번 달 지출", f"{total_expense:,}원")
     c3.metric("남은 잔액", f"{total_income - total_expense:,}원")
 
-    # --- 카테고리별 통계 차트 ---
+    # --- 카테고리별 통계 차트 (Altair 적용) ---
     st.subheader("📊 카테고리별 지출 분석")
     
-    # 지출 데이터만 필터링
-    expense_df = filtered_df[filtered_df['type'] == '지출']
+    # 1. 0원이어도 모든 카테고리가 표시되도록 기본 틀 준비
+    base_categories = pd.DataFrame({'category': category_list})
     
+    # 2. 실제 지출 데이터 합계 구하기
+    expense_df = filtered_df[filtered_df['type'] == '지출']
     if not expense_df.empty:
-        # 카테고리별로 묶어서 합계 계산
         category_sum = expense_df.groupby('category')['amount'].sum().reset_index()
-        
-        # 막대 차트 그리기
-        st.bar_chart(data=category_sum, x='category', y='amount', color="#FF4B4B")
-        
-        # 상세 수치 표시
-        for i, row in category_sum.iterrows():
-            st.write(f"**{row['category']}**: {row['amount']:,}원")
     else:
-        st.info("이번 달 지출 내역이 없어 통계를 표시할 수 없습니다.")
+        category_sum = pd.DataFrame(columns=['category', 'amount'])
+        
+    # 3. 기본 틀에 실제 합계를 덮어씌우기 (비어있는 곳은 0으로 채움)
+    merged_df = pd.merge(base_categories, category_sum, on='category', how='left').fillna(0)
+    
+    # 4. Altair 라이브러리로 차트 그리기
+    chart = alt.Chart(merged_df).mark_bar().encode(
+        # labelAngle=0 이 글자를 가로로 강제 고정합니다. sort를 통해 카테고리 순서도 고정합니다.
+        x=alt.X('category:N', sort=category_list, axis=alt.Axis(labelAngle=0, title='카테고리')),
+        y=alt.Y('amount:Q', axis=alt.Axis(title='금액 (원)')),
+        # 카테고리별로 각기 다른 색상을 자동으로 부여합니다.
+        color=alt.Color('category:N', legend=None),
+        # 막대그래프에 마우스를 올렸을 때 뜨는 정보
+        tooltip=[alt.Tooltip('category', title='카테고리'), alt.Tooltip('amount', title='금액')]
+    ).properties(height=350)
+
+    st.altair_chart(chart, use_container_width=True)
+    
+    # 상세 수치를 화면에 4칸으로 나누어서 깔끔하게 표시
+    st.write("**상세 지출 내역**")
+    cols = st.columns(4)
+    for i, row in merged_df.iterrows():
+        cols[i % 4].write(f"{row['category']}: {int(row['amount']):,}원")
 
     st.divider()
     st.subheader("📋 전체 내역 수정")
     
-    # 표 출력을 위해 금액 포맷팅
     display_df = filtered_df.copy()
     display_df['amount'] = display_df['amount'].apply(lambda x: f"{x:,}")
     
