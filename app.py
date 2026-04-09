@@ -61,7 +61,7 @@ init_db()
 if 'current_date' not in st.session_state:
     st.session_state['current_date'] = datetime.date.today()
 
-category_list = ["식비", "교통", "쇼핑", "의료", "주거", "교육", "저축", "기타"]
+category_list = ["식비", "교통", "쇼핑", "의료", "주거", "여가", "저축", "기타"]
 
 # --- 화면 구성 ---
 st.title('💰 나의 스마트 가계부')
@@ -162,34 +162,33 @@ if not df.empty:
         cols[i % 4].write(f"{row['category']}: {int(row['amount']):,}원")
 
     st.divider()
-    st.subheader("📋 전체 내역 (자동 저장)")
-    st.info("💡 표의 칸을 클릭해서 값을 수정하고 **엔터(Enter)**를 누르면 즉시 위 통계에 반영됩니다.")
+    st.subheader("📋 전체 내역 수정")
+    st.info("💡 표의 칸을 더블 클릭해서 내용을 수정한 후, 아래 [✅ 수정사항 저장] 버튼을 눌러야 반영됩니다.")
     
     display_df = filtered_df.copy()
     display_df['amount'] = display_df['amount'].apply(lambda x: f"{x:,}")
     
     edited_df = st.data_editor(
         display_df,
-        # 🌟 여기에 column_order를 추가하여 원하는 순서대로 열을 배치했습니다. (메모와 카테고리 위치 변경)
-        column_order=["date", "type", "memo", "amount", "category"],
+        column_order=["date", "type", "amount", "category", "memo"],
         column_config={
             "id": None, "year_month": None,
             "type": st.column_config.SelectboxColumn("구분", options=["지출", "수입"]),
             "category": st.column_config.SelectboxColumn("카테고리", options=category_list),
             "amount": st.column_config.TextColumn("금액 (원)"),
             "date": st.column_config.DateColumn("날짜"),
-            "memo": st.column_config.TextColumn("메모") # 영어 memo를 한글 '메모'로 출력되게 수정
+            "memo": st.column_config.TextColumn("메모")
         },
         hide_index=True,
-        use_container_width=True,
-        key="expense_editor" 
+        use_container_width=True
+        # 실시간 추적용이었던 key="expense_editor" 삭제
     )
 
-    if "expense_editor" in st.session_state:
-        changes = st.session_state["expense_editor"]
-        if changes.get("edited_rows") or changes.get("added_rows") or changes.get("deleted_rows"):
-            update_db(edited_df)
-            st.rerun()
+    # 듬직한 수동 저장 버튼 부활!
+    if st.button("✅ 수정사항 저장", use_container_width=True):
+        update_db(edited_df)
+        st.success("수정사항이 안전하게 저장되었습니다!")
+        st.rerun()
             
 else:
     st.info("저장된 내역이 없습니다.")
