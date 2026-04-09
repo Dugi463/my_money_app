@@ -3,7 +3,7 @@ import pandas as pd
 import sqlite3
 import datetime
 
-# 1. 데이터베이스 연결 및 테이블 생성
+# 1. 데이터베이스 연결 및 테이블 생성 (카테고리 컬럼 추가)
 def init_db():
     conn = sqlite3.connect('money.db')
     c = conn.cursor()
@@ -12,19 +12,25 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT,
             type TEXT,
+            category TEXT,
             amount INTEGER,
             memo TEXT
         )
     ''')
+    # 혹시 기존 테이블에 category 컬럼이 없는 경우를 대비해 추가 시도
+    try:
+        c.execute("ALTER TABLE expenses ADD COLUMN category TEXT DEFAULT '기타'")
+    except:
+        pass 
     conn.commit()
     conn.close()
 
 # 2. 데이터 저장 함수
-def insert_data(date, type_, amount, memo):
+def insert_data(date, type_, category, amount, memo):
     conn = sqlite3.connect('money.db')
     c = conn.cursor()
-    c.execute("INSERT INTO expenses (date, type, amount, memo) VALUES (?, ?, ?, ?)",
-              (date, type_, amount, memo))
+    c.execute("INSERT INTO expenses (date, type, category, amount, memo) VALUES (?, ?, ?, ?, ?)",
+              (date, type_, category, amount, memo))
     conn.commit()
     conn.close()
 
@@ -33,14 +39,13 @@ def update_db(edited_df):
     conn = sqlite3.connect('money.db')
     c = conn.cursor()
     for index, row in edited_df.iterrows():
-        # 금액 열의 값에서 콤마(,)나 '원' 글자가 있으면 제거하고 순수 숫자로 변환합니다.
+        # 금액에서 콤마 제거
         clean_amount = int(str(row['amount']).replace(',', '').replace('원', '').strip())
-        
         c.execute("""
             UPDATE expenses 
-            SET date = ?, type = ?, amount = ?, memo = ? 
+            SET date = ?, type = ?, category = ?, amount = ?, memo = ? 
             WHERE id = ?
-        """, (str(row['date']), row['type'], clean_amount, row['memo'], row['id']))
+        """, (str(row['date']), row['type'], row['category'], clean_amount, row['memo'], row['id']))
     conn.commit()
     conn.close()
 
@@ -58,40 +63,44 @@ if 'current_date' not in st.session_state:
     st.session_state['current_date'] = datetime.date.today()
 
 # --- 화면 구성 ---
-st.title('💰 나의 심플 가계부')
+st.title('💰 나의 스마트 가계부')
 
 # 날짜 선택 조작
 st.write("날짜 선택")
 col_prev, col_date, col_next = st.columns([1, 4, 1])
 with col_prev:
-    # 버튼이 왼쪽 끝에 꽉 차도록 옵션 추가
     if st.button("◀ 이전", use_container_width=True):
         st.session_state['current_date'] -= datetime.timedelta(days=1)
 with col_date:
     selected_date = st.date_input("날짜 입력", value=st.session_state['current_date'], label_visibility="collapsed")
     st.session_state['current_date'] = selected_date
 with col_next:
-    # 버튼이 오른쪽 끝에 꽉 차도록 옵션 추가
     if st.button("다음 ▶", use_container_width=True):
         st.session_state['current_date'] += datetime.timedelta(days=1)
 
 # 입력 폼
 with st.form("입력폼", clear_on_submit=True):
-    type_ = st.radio("구분", ["지출", "수입"], index=0, horizontal=True)
+    col_t, col_c = st.columns(2)
+    with col_t:
+        type_ = st.radio("구분", ["지출", "수입"], index=0, horizontal=True)
+    with col_c:
+        # 카테고리 목록 정의
+        category_list = ["식비", "교통", "쇼핑", "의료", "주거", "교육", "저축", "기타"]
+        category = st.selectbox("카테고리", category_list)
+        
     amount = st.number_input("금액을 입력하세요 (원)", min_value=0, step=1000)
-    memo = st.text_input("어디에 쓰셨나요? (메모)")
+    memo = st.text_input("상세 내역 (메모)")
     
-    submitted = st.form_submit_button("내역 저장하기")
+    submitted = st.form_submit_button("내역 저장하기", use_container_width=True)
 
 if submitted:
-    insert_data(str(st.session_state['current_date']), type_, amount, memo)
-    st.success("저장되었습니다!")
+    insert_data(str(st.session_state['current_date']), type_, category, amount, memo)
+    st.success(f"{category} 항목으로 저장되었습니다!")
     st.rerun()
 
 st.divider()
 
-# --- 월별 내역 및 수정 ---
-st.subheader("📋 내역 조회 및 수정")
+# --- 통계 및 내역 조회 ---
 df = load_data()
 
 if not df.empty:
@@ -103,27 +112,47 @@ if not df.empty:
     
     filtered_df = df[df['year_month'] == selected_month].copy()
     
-    # 1. 요약 지표 계산 (데이터가 순수 숫자일 때 미리 합계를 구합니다)
+    # 상단 요약 지표
     total_income = filtered_df[filtered_df['type'] == '수입']['amount'].sum()
     total_expense = filtered_df[filtered_df['type'] == '지출']['amount'].sum()
-    col1, col2, col3 = st.columns(3)
-    col1.metric("총 수입", f"{total_income:,}원")
-    col2.metric("총 지출", f"{total_expense:,}원")
-    col3.metric("잔액", f"{total_income - total_expense:,}원")
     
-    st.info("💡 표의 칸을 더블 클릭해서 수정 후 아래 '수정사항 저장' 버튼을 누르세요. (금액은 콤마 없이 숫자만 입력해도 됩니다)")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("이번 달 수입", f"{total_income:,}원")
+    c2.metric("이번 달 지출", f"{total_expense:,}원")
+    c3.metric("남은 잔액", f"{total_income - total_expense:,}원")
+
+    # --- 카테고리별 통계 차트 ---
+    st.subheader("📊 카테고리별 지출 분석")
     
-    # 2. 표 출력을 위해 금액 데이터를 천 단위 콤마가 있는 '문자열'로 변환합니다.
-    filtered_df['amount'] = filtered_df['amount'].apply(lambda x: f"{x:,}")
+    # 지출 데이터만 필터링
+    expense_df = filtered_df[filtered_df['type'] == '지출']
     
-    # 데이터 에디터 (수정 가능하게 만들기)
+    if not expense_df.empty:
+        # 카테고리별로 묶어서 합계 계산
+        category_sum = expense_df.groupby('category')['amount'].sum().reset_index()
+        
+        # 막대 차트 그리기
+        st.bar_chart(data=category_sum, x='category', y='amount', color="#FF4B4B")
+        
+        # 상세 수치 표시
+        for i, row in category_sum.iterrows():
+            st.write(f"**{row['category']}**: {row['amount']:,}원")
+    else:
+        st.info("이번 달 지출 내역이 없어 통계를 표시할 수 없습니다.")
+
+    st.divider()
+    st.subheader("📋 전체 내역 수정")
+    
+    # 표 출력을 위해 금액 포맷팅
+    display_df = filtered_df.copy()
+    display_df['amount'] = display_df['amount'].apply(lambda x: f"{x:,}")
+    
     edited_df = st.data_editor(
-        filtered_df,
+        display_df,
         column_config={
-            "id": None, 
-            "year_month": None, 
+            "id": None, "year_month": None,
             "type": st.column_config.SelectboxColumn("구분", options=["지출", "수입"]),
-            # 금액 열을 TextColumn으로 변경하여 콤마가 포함된 문자열을 표시합니다.
+            "category": st.column_config.SelectboxColumn("카테고리", options=category_list),
             "amount": st.column_config.TextColumn("금액 (원)"),
             "date": st.column_config.DateColumn("날짜")
         },
@@ -131,11 +160,9 @@ if not df.empty:
         use_container_width=True
     )
 
-    # 수정된 내용이 있을 경우 DB에 반영
-    if st.button("✅ 수정사항 저장"):
+    if st.button("✅ 수정사항 저장", use_container_width=True):
         update_db(edited_df)
-        st.success("데이터베이스에 반영되었습니다!")
+        st.success("데이터가 업데이트되었습니다.")
         st.rerun()
-    
 else:
-    st.info("아직 저장된 내역이 없습니다.")
+    st.info("저장된 내역이 없습니다.")
